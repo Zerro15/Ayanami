@@ -1,0 +1,15 @@
+*.zip
+*.7z
+*.rar
+*.mrpack
+logs/
+*.log
+*.tmp
+*.temp
+.env
+dist/
+*.bak
+*.backup
+*.backup-*
+Thumbs.db
+Desktop.ini
