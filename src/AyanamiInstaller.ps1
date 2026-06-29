@@ -12,6 +12,9 @@ $Script:MinecraftVersion = "1.21.1"
 $Script:LoaderVersion = "NeoForge 21.1.233"
 $Script:JavaVersion = "21"
 $Script:RecommendedRam = "8 GB"
+$Script:ReleaseApiUrl = "https://api.github.com/repos/Zerro15/Ayanami/releases/latest"
+$Script:ReleaseAssetName = "Ayanami-StoneBlock4-client.zip"
+$Script:MinimumClientZipBytes = 500MB
 $Script:SessionLog = New-Object System.Collections.Generic.List[string]
 
 function Add-SessionLog {
@@ -169,15 +172,21 @@ function Copy-ExtractedPack {
     }
 }
 
-function Install-FromLocalZip {
+function Install-ZipPackage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ZipPath,
+
+        [string]$SourceLabel = "zip"
+    )
+
     Write-Host ""
-    Write-Info "Установка сборки из локального zip."
-    $zipInput = Read-Host "Вставь путь к zip-файлу клиентской сборки"
-    $zipPath = $zipInput.Trim().Trim('"')
+    Write-Info "Установка сборки из $SourceLabel."
+    $zipPath = $ZipPath.Trim().Trim('"')
 
     if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
         Write-Problem "Файл не найден: $zipPath"
-        return
+        return $false
     }
 
     $minecraftDir = Get-MinecraftDir
@@ -186,7 +195,7 @@ function Install-FromLocalZip {
         $answer = Read-Host "Создать её? Введи Y для подтверждения"
         if ($answer -notin @("Y", "y", "Д", "д")) {
             Write-Warn "Установка отменена пользователем."
-            return
+            return $false
         }
         New-Item -ItemType Directory -Path $minecraftDir -Force | Out-Null
         Write-Info "Создана папка: $minecraftDir"
@@ -250,14 +259,99 @@ function Install-FromLocalZip {
         Write-Host "Готово. Сборка установлена в:" -ForegroundColor Green
         Write-Host $targetDir -ForegroundColor Green
         Write-Host "Лог: $logPath" -ForegroundColor DarkGray
+        return $true
     } catch {
         Write-Problem "Ошибка установки: $($_.Exception.Message)"
         $logPath = Join-Path $targetDir "install.log"
         Add-SessionLog "Install failed: $($_.Exception.Message)"
         $Script:SessionLog | Set-Content -LiteralPath $logPath -Encoding UTF8
+        return $false
     } finally {
         if (Test-Path -LiteralPath $extractDir) {
             Remove-Item -LiteralPath $extractDir -Recurse -Force
+        }
+    }
+}
+
+function Install-FromLocalZip {
+    Write-Host ""
+    Write-Info "Установка сборки из локального zip."
+    $zipInput = Read-Host "Вставь путь к zip-файлу клиентской сборки"
+    [void](Install-ZipPackage -ZipPath $zipInput -SourceLabel "локального zip")
+}
+
+function Install-FromGitHubRelease {
+    Write-Host ""
+    Write-Info "Автоматическая установка из GitHub Releases."
+    Write-Host "Ищу latest release: $Script:ReleaseApiUrl" -ForegroundColor DarkGray
+
+    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("AyanamiRelease-{0}" -f ([guid]::NewGuid().ToString("N")))
+    $tempZip = Join-Path $tempDir $Script:ReleaseAssetName
+    $installed = $false
+
+    try {
+        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+        if ([Net.ServicePointManager]::SecurityProtocol -band [Net.SecurityProtocolType]::Tls12) {
+            # TLS 1.2 is already enabled.
+        } else {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        }
+
+        $headers = @{
+            "User-Agent" = "Ayanami-StoneBlock4-Installer"
+            "Accept" = "application/vnd.github+json"
+        }
+
+        Add-SessionLog "Fetching latest GitHub release metadata."
+        $release = Invoke-RestMethod -Uri $Script:ReleaseApiUrl -Headers $headers -ErrorAction Stop
+        $asset = @($release.assets) | Where-Object { $_.name -eq $Script:ReleaseAssetName } | Select-Object -First 1
+
+        if (-not $asset) {
+            Write-Problem "В latest release не найден asset: $Script:ReleaseAssetName"
+            Write-Warn "Используй пункт меню 2: установка из локального zip."
+            return
+        }
+
+        Write-Info ("Найден архив: {0} ({1:N1} MB)" -f $asset.name, ($asset.size / 1MB))
+        if ([double]$asset.size -lt $Script:MinimumClientZipBytes) {
+            Write-Problem ("Размер asset меньше 500 MB: {0:N1} MB. Скачивание остановлено." -f ($asset.size / 1MB))
+            Write-Warn "Проверь релиз GitHub или используй пункт меню 2."
+            return
+        }
+
+        Write-Info "Скачиваю клиентский архив во временную папку..."
+        Write-Host $tempZip -ForegroundColor DarkGray
+        Add-SessionLog "Downloading release asset: $($asset.browser_download_url)"
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempZip -Headers @{ "User-Agent" = "Ayanami-StoneBlock4-Installer" } -UseBasicParsing
+
+        if (-not (Test-Path -LiteralPath $tempZip -PathType Leaf)) {
+            throw "Файл не появился после скачивания."
+        }
+
+        $downloaded = Get-Item -LiteralPath $tempZip
+        Add-SessionLog ("Downloaded zip size: {0} bytes" -f $downloaded.Length)
+        if ($downloaded.Length -lt $Script:MinimumClientZipBytes) {
+            throw ("Скачанный файл меньше 500 MB: {0:N1} MB" -f ($downloaded.Length / 1MB))
+        }
+
+        Write-Info ("Скачано: {0:N1} MB" -f ($downloaded.Length / 1MB))
+        $installed = Install-ZipPackage -ZipPath $tempZip -SourceLabel "GitHub Releases"
+    } catch {
+        Write-Problem "Автоматическая установка не удалась: $($_.Exception.Message)"
+        Write-Warn "Можно скачать архив вручную из GitHub Releases и выбрать пункт меню 2."
+        Add-SessionLog "GitHub release install failed: $($_.Exception.Message)"
+    } finally {
+        if ($installed -and (Test-Path -LiteralPath $tempZip)) {
+            Remove-Item -LiteralPath $tempZip -Force
+            Add-SessionLog "Temporary release zip deleted."
+        }
+
+        if (Test-Path -LiteralPath $tempDir) {
+            $remaining = @(Get-ChildItem -LiteralPath $tempDir -Force -ErrorAction SilentlyContinue)
+            if ($remaining.Count -eq 0) {
+                Remove-Item -LiteralPath $tempDir -Force
+            }
         }
     }
 }
@@ -360,10 +454,11 @@ function Show-Menu {
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host " Ayanami StoneBlock 4 Installer" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "1) Установить сборку из локального zip"
-    Write-Host "2) Проверить Java 21"
-    Write-Host "3) Показать инструкцию для TLauncher"
+    Write-Host "1) Установить сборку автоматически из GitHub Releases"
+    Write-Host "2) Установить сборку из локального zip"
+    Write-Host "3) Проверить Java 21"
     Write-Host "4) Показать характеристики компьютера"
+    Write-Host "5) Показать инструкцию для TLauncher"
     Write-Host "0) Выход"
     Write-Host ""
 }
@@ -376,10 +471,11 @@ while ($running) {
     $choice = Read-Host "Выбери пункт"
 
     switch ($choice) {
-        "1" { Install-FromLocalZip }
-        "2" { [void](Test-Java21) }
-        "3" { Show-TLauncherGuide }
+        "1" { Install-FromGitHubRelease }
+        "2" { Install-FromLocalZip }
+        "3" { [void](Test-Java21) }
         "4" { Show-ComputerSpecs }
+        "5" { Show-TLauncherGuide }
         "0" {
             Add-SessionLog "Installer exited."
             Write-Host "Пока. Удачной игры на Ayanami!" -ForegroundColor Green

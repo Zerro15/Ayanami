@@ -2,7 +2,7 @@
 
 Простой установщик для друзей сервера **Ayanami StoneBlock 4 / Аянами**.
 
-Он помогает распаковать локальный zip клиентской сборки в отдельную папку игры:
+Он помогает скачать клиентский архив из GitHub Releases или распаковать локальный zip клиентской сборки в отдельную папку игры:
 
 ```text
 %APPDATA%\.minecraft\Ayanami-StoneBlock4
@@ -25,8 +25,27 @@ irm https://raw.githubusercontent.com/Zerro15/Ayanami/main/install.ps1 | iex
 - Windows 10/11
 - PowerShell
 - Java 21 x64, например Temurin/OpenJDK 21
-- Локальный zip клиентской сборки Ayanami StoneBlock 4
+- Доступ к GitHub Releases или локальный zip клиентской сборки Ayanami StoneBlock 4
 - Лаунчер, который умеет запускать Minecraft 1.21.1 с NeoForge
+
+## Установка через GitHub Releases
+
+1. Запусти команду быстрого запуска.
+2. Выбери пункт:
+
+   ```text
+   1) Установить сборку автоматически из GitHub Releases
+   ```
+
+3. Установщик получит latest release через GitHub API, найдёт asset:
+
+   ```text
+   Ayanami-StoneBlock4-client.zip
+   ```
+
+4. Архив будет скачан во временную папку, проверен по размеру и установлен в отдельную папку игры.
+
+Если GitHub API недоступен или asset не найден, скачай zip вручную из Releases и выбери установку из локального zip.
 
 ## Сервер
 
@@ -39,7 +58,7 @@ irm https://raw.githubusercontent.com/Zerro15/Ayanami/main/install.ps1 | iex
 - Адрес: `199.83.103.157:25845`
 - Рекомендуемая RAM клиенту: 8 GB
 
-## Ручная установка
+## Ручная установка из zip
 
 1. Установи Java 21 x64.
 2. Распакуй клиентский zip в:
