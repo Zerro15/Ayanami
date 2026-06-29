@@ -280,6 +280,81 @@ function Show-TLauncherGuide {
     Write-Host "Если TLauncher не видит сборку, лучше использовать Prism Launcher / FTB App / CurseForge App." -ForegroundColor Yellow
 }
 
+function Format-BytesGiB {
+    param([double]$Bytes)
+
+    if ($Bytes -le 0) {
+        return "неизвестно"
+    }
+
+    return ("{0:N1} GB" -f ($Bytes / 1GB))
+}
+
+function Write-SpecLine {
+    param(
+        [string]$Name,
+        [string]$Value
+    )
+
+    $line = "{0}: {1}" -f $Name, $Value
+    Write-Host $line
+    Add-SessionLog $line
+}
+
+function Show-ComputerSpecs {
+    Write-Host ""
+    Write-Host "Характеристики компьютера" -ForegroundColor Cyan
+    Write-Host "Данные только показываются в консоли и не отправляются." -ForegroundColor DarkGray
+    Add-SessionLog "Computer specs requested."
+
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem
+        $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+        $gpus = @(Get-CimInstance Win32_VideoController | Where-Object { $_.Name })
+        $drives = @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3")
+        $java = Get-JavaVersionInfo
+
+        Write-Host ""
+        Write-SpecLine "Windows" ("{0} build {1}" -f $os.Caption, $os.BuildNumber)
+        Write-SpecLine "Процессор" $cpu.Name.Trim()
+        Write-SpecLine "Ядра / потоки" ("{0} / {1}" -f $cpu.NumberOfCores, $cpu.NumberOfLogicalProcessors)
+        Write-SpecLine "ОЗУ всего" (Format-BytesGiB -Bytes ([double]$os.TotalVisibleMemorySize * 1KB))
+        Write-SpecLine "ОЗУ свободно сейчас" (Format-BytesGiB -Bytes ([double]$os.FreePhysicalMemory * 1KB))
+
+        if ($gpus.Count -gt 0) {
+            for ($i = 0; $i -lt $gpus.Count; $i++) {
+                $gpu = $gpus[$i]
+                $gpuRam = if ($gpu.AdapterRAM) { Format-BytesGiB -Bytes ([double]$gpu.AdapterRAM) } else { "неизвестно" }
+                Write-SpecLine ("Видеокарта {0}" -f ($i + 1)) ("{0} ({1})" -f $gpu.Name, $gpuRam)
+            }
+        } else {
+            Write-SpecLine "Видеокарта" "не найдена"
+        }
+
+        foreach ($drive in $drives) {
+            Write-SpecLine ("Диск {0}" -f $drive.DeviceID) ("свободно {0} из {1}" -f (Format-BytesGiB -Bytes ([double]$drive.FreeSpace)), (Format-BytesGiB -Bytes ([double]$drive.Size)))
+        }
+
+        if ($java.Found) {
+            Write-SpecLine "Java" ($java.Raw -replace "`r?`n", " | ")
+        } else {
+            Write-SpecLine "Java" "не найдена в PATH"
+        }
+
+        $totalRamGb = ([double]$os.TotalVisibleMemorySize * 1KB) / 1GB
+        Write-Host ""
+        if ($totalRamGb -ge 12) {
+            Write-Host "Для клиента можно пробовать выделить 8 GB RAM." -ForegroundColor Green
+        } elseif ($totalRamGb -ge 8) {
+            Write-Host "ОЗУ немного впритык: попробуй 6 GB RAM, а 8 GB только если Windows не забита." -ForegroundColor Yellow
+        } else {
+            Write-Host "ОЗУ мало для комфортного StoneBlock 4. Лучше закрыть лишнее и выделять 4-6 GB." -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Problem "Не удалось прочитать характеристики: $($_.Exception.Message)"
+    }
+}
+
 function Show-Menu {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
@@ -288,6 +363,7 @@ function Show-Menu {
     Write-Host "1) Установить сборку из локального zip"
     Write-Host "2) Проверить Java 21"
     Write-Host "3) Показать инструкцию для TLauncher"
+    Write-Host "4) Показать характеристики компьютера"
     Write-Host "0) Выход"
     Write-Host ""
 }
@@ -303,6 +379,7 @@ while ($running) {
         "1" { Install-FromLocalZip }
         "2" { [void](Test-Java21) }
         "3" { Show-TLauncherGuide }
+        "4" { Show-ComputerSpecs }
         "0" {
             Add-SessionLog "Installer exited."
             Write-Host "Пока. Удачной игры на Ayanami!" -ForegroundColor Green
